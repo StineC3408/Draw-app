@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Draw!</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: #1a1a2e;
+    font-family: 'Comic Sans MS', 'Chalkboard SE', cursive;
+  }
+
+  #canvas-wrap {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+  }
+
+  #canvas {
+    display: block;
+    cursor: crosshair;
+    width: 100%;
+    height: 100%;
+  }
+
+  #toolbar {
+    flex-shrink: 0;
+    height: 90px;
+    background: rgba(255,255,255,0.18);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0 14px;
+    border-top: 3px solid rgba(255,255,255,0.3);
+    gap: 12px;
+    z-index: 10;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  #toolbar::-webkit-scrollbar { display: none; }
+
+  .color-btn {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 4px solid rgba(255,255,255,0.3);
+    cursor: pointer;
+    transition: transform 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+    touch-action: pan-x;
+  }
+
+  .color-btn.active {
+    border-color: white;
+    transform: scale(1.25);
+    box-shadow: 0 0 16px rgba(255,255,255,0.6);
+  }
+
+  .tool-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    border: 3px solid rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.15);
+    cursor: pointer;
+    font-size: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s, background 0.15s;
+    flex-shrink: 0;
+    touch-action: pan-x;
+  }
+
+  #brush-size-wrap {
+    touch-action: pan-x;
+  }
+
+  .tool-btn:active {
+    transform: scale(0.9);
+    background: rgba(255,255,255,0.35);
+  }
+
+  #brush-size-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  #brush-size {
+    -webkit-appearance: none;
+    width: 80px;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.3);
+    outline: none;
+  }
+
+  #brush-size::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: white;
+    cursor: pointer;
+  }
+
+  #brush-preview {
+    background: white;
+    border-radius: 50%;
+    transition: width 0.1s, height 0.1s;
+  }
+
+  #confetti-container {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .confetti-piece {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    animation: fall linear forwards;
+    top: -20px;
+  }
+
+  @keyframes fall {
+    to { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+  <div id="confetti-container"></div>
+</div>
+
+<div id="toolbar">
+  <!-- Colors -->
+  <div class="color-btn active" data-color="#FF4D6D" style="background:#FF4D6D"></div>
+  <div class="color-btn" data-color="#FF9F1C" style="background:#FF9F1C"></div>
+  <div class="color-btn" data-color="#FFDD57" style="background:#FFDD57"></div>
+  <div class="color-btn" data-color="#06D6A0" style="background:#06D6A0"></div>
+  <div class="color-btn" data-color="#4CC9F0" style="background:#4CC9F0"></div>
+  <div class="color-btn" data-color="#9B5DE5" style="background:#9B5DE5"></div>
+  <div class="color-btn" data-color="#FFFFFF" style="background:#FFFFFF; border-color: rgba(255,255,255,0.5)"></div>
+
+  <!-- Brush size -->
+  <div id="brush-size-wrap">
+    <div id="brush-preview" style="width:16px;height:16px"></div>
+    <input type="range" id="brush-size" min="4" max="80" value="18">
+  </div>
+
+  <!-- Tools -->
+  <div class="tool-btn" id="btn-eraser" title="Eraser">🧹</div>
+  <div class="tool-btn" id="btn-sparkle" title="Sparkle">✨</div>
+  <div class="tool-btn" id="btn-clear" title="Clear">🗑️</div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const confettiContainer = document.getElementById('confetti-container');
+
+let currentColor = '#FF4D6D';
+let brushSize = 18;
+let isDrawing = false;
+let lastX = 0, lastY = 0;
+let mode = 'draw'; // 'draw' | 'erase' | 'sparkle'
+let strokeCount = 0;
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  const imageData = canvas.width > 0 && canvas.height > 0
+    ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
+  canvas.width = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  if (imageData) ctx.putImageData(imageData, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Color buttons
+document.querySelectorAll('.color-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentColor = btn.dataset.color;
+    if (mode === 'erase') setMode('draw');
+  });
+});
+
+// Brush size
+const brushSlider = document.getElementById('brush-size');
+const brushPreview = document.getElementById('brush-preview');
+brushSlider.addEventListener('input', () => {
+  brushSize = parseInt(brushSlider.value);
+  const s = Math.max(6, brushSize * 0.6);
+  brushPreview.style.width = s + 'px';
+  brushPreview.style.height = s + 'px';
+});
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-eraser').style.background =
+    m === 'erase' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)';
+  document.getElementById('btn-sparkle').style.background =
+    m === 'sparkle' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)';
+}
+
+document.getElementById('btn-eraser').addEventListener('click', () => {
+  setMode(mode === 'erase' ? 'draw' : 'erase');
+});
+
+document.getElementById('btn-sparkle').addEventListener('click', () => {
+  setMode(mode === 'sparkle' ? 'draw' : 'sparkle');
+});
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  launchConfetti();
+  strokeCount = 0;
+});
+
+// Drawing
+function getPos(e) {
+  const r = canvas.getBoundingClientRect();
+  if (e.touches) {
+    return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
+  }
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function startDraw(e) {
+  e.preventDefault();
+  isDrawing = true;
+  const { x, y } = getPos(e);
+  lastX = x; lastY = y;
+  if (mode === 'sparkle') {
+    spawnSparkles(x, y);
+  } else {
+    drawDot(x, y);
+  }
+}
+
+function draw(e) {
+  e.preventDefault();
+  if (!isDrawing) return;
+  const { x, y } = getPos(e);
+  if (mode === 'sparkle') {
+    spawnSparkles(x, y);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = mode === 'erase' ? 'rgba(0,0,0,1)' : currentColor;
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (mode === 'erase') {
+      ctx.globalCompositeOperation = 'destination-out';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.shadowColor = currentColor;
+      ctx.shadowBlur = brushSize * 0.4;
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  lastX = x; lastY = y;
+}
+
+function drawDot(x, y) {
+  ctx.beginPath();
+  ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+  if (mode === 'erase') {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowColor = currentColor;
+    ctx.shadowBlur = brushSize * 0.4;
+    ctx.fillStyle = currentColor;
+  }
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function endDraw(e) {
+  if (!isDrawing) return;
+  isDrawing = false;
+  strokeCount++;
+  if (strokeCount > 0 && strokeCount % 10 === 0) launchConfetti(8);
+}
+
+canvas.addEventListener('mousedown', startDraw);
+canvas.addEventListener('mousemove', draw);
+canvas.addEventListener('mouseup', endDraw);
+canvas.addEventListener('touchstart', startDraw, { passive: false });
+canvas.addEventListener('touchmove', draw, { passive: false });
+canvas.addEventListener('touchend', endDraw);
+
+// Sparkle mode
+function spawnSparkles(x, y) {
+  const sparkleColors = ['#FF4D6D','#FF9F1C','#FFDD57','#06D6A0','#4CC9F0','#9B5DE5','#FFFFFF'];
+  const count = 6;
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+    const dist = brushSize * 0.8 + Math.random() * brushSize;
+    const sx = x + Math.cos(angle) * dist;
+    const sy = y + Math.sin(angle) * dist;
+    const r = 3 + Math.random() * (brushSize * 0.3);
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.fillStyle = sparkleColors[Math.floor(Math.random() * sparkleColors.length)];
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = r * 2;
+    ctx.globalAlpha = 0.7 + Math.random() * 0.3;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+  // Center dot
+  ctx.beginPath();
+  ctx.arc(x, y, brushSize * 0.35, 0, Math.PI * 2);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.shadowColor = '#FFFFFF';
+  ctx.shadowBlur = 8;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+// Confetti
+function launchConfetti(count = 40) {
+  const colors = ['#FF4D6D','#FF9F1C','#FFDD57','#06D6A0','#4CC9F0','#9B5DE5'];
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement('div');
+    el.className = 'confetti-piece';
+    el.style.background = colors[Math.floor(Math.random() * colors.length)];
+    el.style.left = Math.random() * 100 + 'vw';
+    el.style.animationDuration = (1.2 + Math.random() * 1.5) + 's';
+    el.style.animationDelay = (Math.random() * 0.4) + 's';
+    el.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+    el.style.width = el.style.height = (8 + Math.random() * 10) + 'px';
+    confettiContainer.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+  }
+}
+</script>
+</body>
+</html>
